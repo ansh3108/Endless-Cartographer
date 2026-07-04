@@ -13,17 +13,14 @@ class Noise {
         }
         for (let i = 0; i < 512; i++) this.p[i] = p[i & 255];
     }
-
     fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
     lerp(a, b, t) { return a + t * (b - a); }
-    
     grad(hash, x, y) {
         let h = hash & 3;
         let u = h < 2 ? x : y;
         let v = h < 2 ? y : x;
         return ((h & 1) ? -u : u) + ((h & 2) ? -2 * v : 2 * v);
     }
-
     get(x, y) {
         let X = Math.floor(x) & 255;
         let Y = Math.floor(y) & 255;
@@ -50,6 +47,61 @@ function mulberry32(a) {
     }
 }
 
+class AudioEngine {
+    constructor() {
+        this.actx = new (window.AudioContext || window.webkitAudioContext)();
+        this.master = this.actx.createGain();
+        this.master.gain.value = 0.25;
+        this.master.connect(this.actx.destination);
+
+        this.windGain = this.actx.createGain();
+        this.windGain.gain.value = 0;
+        this.windGain.connect(this.master);
+
+        let buf = this.actx.createBuffer(1, this.actx.sampleRate * 2, this.actx.sampleRate);
+        let d = buf.getChannelData(0);
+        for(let i=0; i<d.length; i++) d[i] = Math.random() * 2 - 1;
+        
+        this.wind = this.actx.createBufferSource();
+        this.wind.buffer = buf;
+        this.wind.loop = true;
+        let lp = this.actx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 300;
+        this.wind.connect(lp);
+        lp.connect(this.windGain);
+        this.wind.start();
+
+        this.waterGain = this.actx.createGain();
+        this.waterGain.gain.value = 0;
+        this.waterGain.connect(this.master);
+        
+        let osc1 = this.actx.createOscillator();
+        osc1.type = 'sine';
+        osc1.frequency.value = 55;
+        let osc2 = this.actx.createOscillator();
+        osc2.type = 'sine';
+        osc2.frequency.value = 57;
+        osc1.connect(this.waterGain);
+        osc2.connect(this.waterGain);
+        osc1.start();
+        osc2.start();
+    }
+
+    update(biome) {
+        let t = this.actx.currentTime;
+        let wTarget = 0;
+        let waTarget = 0;
+        
+        if (biome.t === 'desert' || biome.t === 'mountain' || biome.t === 'snow') wTarget = 0.6;
+        if (biome.t === 'grass') wTarget = 0.15;
+        if (biome.t === 'water' || biome.t === 'shallow') waTarget = 0.5;
+        
+        this.windGain.gain.linearRampToValueAtTime(wTarget, t + 2);
+        this.waterGain.gain.linearRampToValueAtTime(waTarget, t + 2);
+    }
+}
+
 class Camera {
     constructor(cvs) {
         this.cvs = cvs;
@@ -59,14 +111,25 @@ class Camera {
         this.drag = false;
         this.lx = 0;
         this.ly = 0;
+        this.sx = 0;
+        this.sy = 0;
         
         cvs.onmousedown = (e) => {
             this.drag = true;
             this.lx = e.clientX;
             this.ly = e.clientY;
+            this.sx = e.clientX;
+            this.sy = e.clientY;
         };
 
-        window.onmouseup = () => this.drag = false;
+        window.onmouseup = (e) => {
+            this.drag = false;
+            let dx = e.clientX - this.sx;
+            let dy = e.clientY - this.sy;
+            if (dx*dx + dy*dy < 25) {
+                this.handleClick(e);
+            }
+        };
 
         window.onmousemove = (e) => {
             if (this.drag) {
@@ -82,16 +145,19 @@ class Camera {
             let f = Math.exp(-e.deltaY * 0.001);
             let mx = e.clientX;
             let my = e.clientY;
-            
             let wx = this.x + mx / this.z;
             let wy = this.y + my / this.z;
-
             this.z *= f;
             this.z = Math.max(0.02, Math.min(8, this.z));
-
             this.x = wx - mx / this.z;
             this.y = wy - my / this.z;
         };
+    }
+
+    handleClick(e) {
+        let wx = this.x + e.offsetX / this.z;
+        let wy = this.y + e.offsetY / this.z;
+        world.checkDiscovery(wx, wy);
     }
 }
 
@@ -99,6 +165,7 @@ class Chunk {
     constructor(cx, cy, world) {
         this.cx = cx;
         this.cy = cy;
+        this.landmarks = [];
         this.cvs = document.createElement('canvas');
         this.cvs.width = 512;
         this.cvs.height = 512;
@@ -136,15 +203,24 @@ class Chunk {
             }
         }
         
-        if (rand() < 0.03) {
-            let px = rand() * 480 + 16;
-            let py = rand() * 480 + 16;
-            ctx.fillStyle = '#555';
-            ctx.fillRect(px - 12, py - 12, 24, 24);
-            ctx.fillStyle = '#222';
-            ctx.fillRect(px - 8, py - 8, 16, 16);
+        if (rand() < 0.04) {
+            let px = rand() * 440 + 36;
+            let py = rand() * 440 + 36;
+            ctx.fillStyle = '#444';
+            ctx.fillRect(px - 14, py - 14, 28, 28);
+            ctx.fillStyle = '#111';
+            ctx.fillRect(px - 10, py - 10, 20, 20);
             ctx.fillStyle = '#ffcc00';
-            ctx.fillRect(px - 2, py - 10, 4, 4);
+            ctx.fillRect(px - 3, py - 12, 6, 6);
+            
+            let wx = cx * 16 + Math.floor(px / 32);
+            let wy = cy * 16 + Math.floor(py / 32);
+            this.landmarks.push({
+                x: wx,
+                y: wy,
+                name: world.genName(rand),
+                type: world.getBiome(wx, wy).t
+            });
         }
     }
 }
@@ -156,16 +232,30 @@ class World {
         this.elev = new Noise(this.seed);
         this.moist = new Noise(this.seed + 100);
         this.explored = new Set();
+        this.discoveries = new Set();
         this.load();
     }
 
     load() {
-        let s = localStorage.getItem('cartographer_fog');
-        if (s) this.explored = new Set(JSON.parse(s));
+        let f = localStorage.getItem('cartographer_fog');
+        if (f) this.explored = new Set(JSON.parse(f));
+        let d = localStorage.getItem('cartographer_disc');
+        if (d) {
+            this.discoveries = new Set(JSON.parse(d));
+            this.updateJournalUI();
+        }
     }
 
     save() {
         localStorage.setItem('cartographer_fog', JSON.stringify(Array.from(this.explored)));
+        localStorage.setItem('cartographer_disc', JSON.stringify(Array.from(this.discoveries)));
+    }
+
+    genName(rand) {
+        let p = ["Sunken", "Shattered", "Ancient", "Forgotten", "Crystal", "Obsidian", "Silent"];
+        let n = ["Spire", "Ruin", "Monolith", "Obelisk", "Altar", "Citadel", "Vault"];
+        let s = ["Velundra", "Kael", "Oth", "Xyr", "Marn", "Aethel", "Nyx"];
+        return `The ${p[Math.floor(rand()*p.length)]} ${n[Math.floor(rand()*n.length)]} of ${s[Math.floor(rand()*s.length)]}`;
     }
 
     getBiome(x, y) {
@@ -175,18 +265,48 @@ class World {
         if (e < -0.2) return { t: 'water', c: '#1a3c5e' };
         if (e < -0.1) return { t: 'shallow', c: '#2b5c8a' };
         if (e < 0.0) return { t: 'sand', c: '#d4b872' };
-        
         if (e > 0.4) return { t: 'mountain', c: '#666' };
         if (e > 0.6) return { t: 'snow', c: '#eee' };
-        
         if (m < -0.1) return { t: 'desert', c: '#c2b280' };
         if (m > 0.2) return { t: 'forest', c: '#2d4c2b' };
         return { t: 'grass', c: '#4a7c59' };
     }
 
-    draw(cam, cvs, ctx) {
-        let CP = 512;
+    checkDiscovery(wx, wy) {
+        for (let [k, chunk] of this.chunks) {
+            for (let lm of chunk.landmarks) {
+                let dx = lm.x - wx;
+                let dy = lm.y - wy;
+                if (dx*dx + dy*dy < 150) {
+                    if (!this.discoveries.has(lm.name)) {
+                        this.discoveries.add(lm.name);
+                        this.addJournalEntry(lm.name, lm.type);
+                        this.save();
+                    }
+                }
+            }
+        }
+    }
 
+    addJournalEntry(name, type) {
+        let ul = document.getElementById('j-list');
+        let li = document.createElement('li');
+        li.innerHTML = `${name}<span>Discovered in ${type} biome</span>`;
+        ul.prepend(li);
+    }
+
+    updateJournalUI() {
+        let ul = document.getElementById('j-list');
+        ul.innerHTML = '';
+        for (let name of this.discoveries) {
+            let li = document.createElement('li');
+            li.innerHTML = `${name}<span>Previously discovered</span>`;
+            ul.appendChild(li);
+        }
+    }
+
+    draw(cam, cvs, ctx, dayTime) {
+        let CP = 512;
         let sx = Math.floor(cam.x / CP) - 1;
         let sy = Math.floor(cam.y / CP) - 1;
         let ex = Math.ceil((cam.x + cvs.width / cam.z) / CP) + 1;
@@ -204,6 +324,7 @@ class World {
         }
 
         let active = new Set();
+        let centerBiome = this.getBiome(Math.floor(cam.x / 32), Math.floor(cam.y / 32));
 
         for (let {cx, cy} of queue) {
             let k = cx + ',' + cy;
@@ -238,9 +359,15 @@ class World {
             }
         }
 
+        let dark = (Math.cos(dayTime * 6.28) + 1) / 2;
+        ctx.fillStyle = `rgba(5, 10, 35, ${dark * 0.75})`;
+        ctx.fillRect(0, 0, cvs.width, cvs.height);
+
         for (let k of this.chunks.keys()) {
             if (!active.has(k)) this.chunks.delete(k);
         }
+
+        return centerBiome;
     }
 }
 
@@ -257,18 +384,17 @@ addEventListener('resize', resize);
 resize();
 
 const cam = new Camera(cvs);
-const world = new World(1337);
-
+const world = new World(Math.floor(Math.random() * 10000));
+let audio = null;
+let dayTime = 0.25;
 let lastSave = 0;
 
 function drawMini() {
     mctx.fillStyle = '#000';
     mctx.fillRect(0, 0, 200, 200);
-    
     let pcx = Math.floor(cam.x / 512);
     let pcy = Math.floor(cam.y / 512);
     let r = 50;
-    
     for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
             let cx = pcx + dx;
@@ -280,7 +406,6 @@ function drawMini() {
             }
         }
     }
-    
     mctx.fillStyle = '#fff';
     mctx.fillRect(98, 98, 4, 4);
 }
@@ -289,23 +414,41 @@ function loop() {
     ctx.fillStyle = '#111';
     ctx.fillRect(0, 0, cvs.width, cvs.height);
 
-    world.draw(cam, cvs, ctx);
+    dayTime += 0.00015;
+    if (dayTime > 1) dayTime = 0;
+
+    let currentBiome = world.draw(cam, cvs, ctx, dayTime);
     drawMini();
 
+    if (audio) audio.update(currentBiome);
+
     let now = Date.now();
-    if (now - lastSave > 2000) {
+    if (now - lastSave > 5000) {
         world.save();
         lastSave = now;
     }
 
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(10, 10, 250, 30);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(10, 10, 280, 30);
     ctx.fillStyle = '#fff';
     ctx.font = '12px monospace';
-    ctx.fillText(`x:${cam.x.toFixed(0)} y:${cam.y.toFixed(0)} z:${cam.z.toFixed(2)} explored:${world.explored.size}`, 20, 30);
+    ctx.fillText(`x:${cam.x.toFixed(0)} y:${cam.y.toFixed(0)} z:${cam.z.toFixed(2)} time:${(dayTime*24).toFixed(1)}h`, 20, 30);
 
     requestAnimationFrame(loop);
 }
-loop();
+window.onkeydown = (e) => {
+
+    if (e.key === 'j' || e.key === 'J') {
+        document.getElementById('journal').classList.toggle('open');
+    }
+}
+
+document.getElementById('start').onclick = () => {
+    document.getElementById('start').style.opacity = '0';
+    setTimeout(() => document.getElementById('start').style.display = 'none', 500);
+    audio = new AudioEngine();
+    loop();
+}
+
 
 
