@@ -1,0 +1,16 @@
+body, html {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #000;
+    font-family: monospace;
+}
+
+#c {
+    display: block;
+    cursor: grab;
+}
+
+#c:active {
+    cursor: grabbing;
+}
