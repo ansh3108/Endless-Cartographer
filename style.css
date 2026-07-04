@@ -14,3 +14,12 @@ body, html {
 #c:active {
     cursor: grabbing;
 }
+
+#mini {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    border: 2px solid #333;
+    image-rendering: pixelated;
+    background: #000;
+}
