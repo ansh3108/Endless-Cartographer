@@ -22,6 +22,7 @@ body, html {
     border: 2px solid #333;
     image-rendering: pixelated;
     background: #000;
+    z-index: 10;
 }
 
 #start {
@@ -43,20 +44,55 @@ body, html {
     color: #fff;
 }
 
+#toolbar {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    display: flex;
+    gap: 10px;
+    z-index: 50;
+}
+
+#toolbar button {
+    background: rgba(10, 15, 20, 0.85);
+    color: #ccc;
+    border: 1px solid #333;
+    padding: 8px 12px;
+    font-family: monospace;
+    font-size: 14px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    transition: all 0.2s;
+}
+
+#toolbar button:hover {
+    background: rgba(30, 40, 50, 0.95);
+    color: #fff;
+    border-color: #555;
+}
+
+#toolbar button.active {
+    background: #ffcc00;
+    color: #000;
+    border-color: #ffcc00;
+}
+
 #journal {
     position: fixed;
     top: 20px;
     right: 20px;
-    width: 280px;
-    max-height: 50vh;
-    background: rgba(10, 15, 20, 0.85);
+    width: 300px;
+    max-height: 60vh;
+    background: rgba(10, 15, 20, 0.95);
     color: #ccc;
     padding: 15px;
-    border: 1px solid #333;
+    border: 1px solid #444;
     overflow-y: auto;
     display: none;
-    backdrop-filter: blur(4px);
-    z-index: 50;
+    backdrop-filter: blur(8px);
+    z-index: 100;
+    pointer-events: auto;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 
 #journal.open {
@@ -86,11 +122,16 @@ body, html {
     line-height: 1.4;
 }
 
+#journal li strong {
+    color: #fff;
+    display: block;
+    margin-bottom: 4px;
+}
+
 #journal li span {
     display: block;
-    color: #666;
+    color: #888;
     font-size: 10px;
-    margin-top: 4px;
 }
 
 .hint {
@@ -99,4 +140,5 @@ body, html {
     font-size: 10px;
     margin-top: 15px;
 }
+
 
